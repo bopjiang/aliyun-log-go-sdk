@@ -1,6 +1,7 @@
 package sls
 
 import (
+	"compress/zlib"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -151,7 +152,7 @@ func (s *LogStore) GetLogsBytes(shardID int, cursor, endCursor string,
 	h := map[string]string{
 		"x-log-bodyrawsize": "0",
 		"Accept":            "application/x-protobuf",
-		"Accept-Encoding":   "lz4",
+		"Accept-Encoding":   "deflate",
 	}
 
 	uri := ""
@@ -163,17 +164,19 @@ func (s *LogStore) GetLogsBytes(shardID int, cursor, endCursor string,
 			s.Name, shardID, cursor, endCursor, logGroupMaxCount)
 	}
 
-	r, err := request(s.project, "GET", uri, h, nil)
-	if err != nil {
-		return
-	}
-
-	buf, err := ioutil.ReadAll(r.Body)
+	var r *http.Response
+	r, err = request(s.project, "GET", uri, h, nil)
 	if err != nil {
 		return
 	}
 
 	if r.StatusCode != http.StatusOK {
+		var buf []byte
+		buf, err = ioutil.ReadAll(r.Body)
+		if err != nil {
+			return
+		}
+
 		errMsg := &Error{}
 		err = json.Unmarshal(buf, errMsg)
 		if err != nil {
@@ -192,7 +195,7 @@ func (s *LogStore) GetLogsBytes(shardID int, cursor, endCursor string,
 		err = fmt.Errorf("can't find 'x-log-compresstype' header")
 		return
 	}
-	if v[0] != "lz4" {
+	if v[0] != "deflate" {
 		err = fmt.Errorf("unexpected compress type:%v", v[0])
 		return
 	}
@@ -204,18 +207,22 @@ func (s *LogStore) GetLogsBytes(shardID int, cursor, endCursor string,
 	}
 	nextCursor = v[0]
 
-	v, ok = r.Header["X-Log-Bodyrawsize"]
-	if !ok || len(v) == 0 {
-		err = fmt.Errorf("can't find 'x-log-bodyrawsize' header")
-		return
-	}
-	bodyRawSize, err := strconv.Atoi(v[0])
-	if err != nil {
-		return
-	}
+	/*
+		v, ok = r.Header["X-Log-Bodyrawsize"]
+		if !ok || len(v) == 0 {
+			err = fmt.Errorf("can't find 'x-log-bodyrawsize' header")
+			return
+		}
+		bodyRawSize, err := strconv.Atoi(v[0])
+		if err != nil {
+			return
+		}
+		fmt.Printf("bodyRawSize=%d\n", bodyRawSize)
+	*/
 
-	out = make([]byte, bodyRawSize)
-	err = lz4.Uncompress(buf, out)
+	fr, _ := zlib.NewReader(r.Body)
+	defer r.Body.Close()
+	out, err = ioutil.ReadAll(fr)
 	if err != nil {
 		return
 	}
@@ -287,9 +294,9 @@ func (s *LogStore) GetHistograms(topic string, from int64, to int64, queryExp st
 		return nil, err
 	}
 	getHistogramsResponse := GetHistogramsResponse{
-		Progress: r.Header[ProgressHeader][0],
-		Count:    count,
-		Histograms:     histograms,
+		Progress:   r.Header[ProgressHeader][0],
+		Count:      count,
+		Histograms: histograms,
 	}
 
 	return &getHistogramsResponse, nil
