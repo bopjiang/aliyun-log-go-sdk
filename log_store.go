@@ -220,9 +220,9 @@ func (s *LogStore) GetLogsBytes(shardID int, cursor, endCursor string,
 		fmt.Printf("bodyRawSize=%d\n", bodyRawSize)
 	*/
 
-	fr, _ := zlib.NewReader(r.Body)
+	zlibr, _ := zlib.NewReader(r.Body)
 	defer r.Body.Close()
-	out, err = ioutil.ReadAll(fr)
+	out, err = ioutil.ReadAll(zlibr)
 	if err != nil {
 		return
 	}
